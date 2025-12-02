@@ -100,30 +100,32 @@ class ExtractInvoices:
     # STEP 3 → Process a single uploaded PDF → Return DataFrame
     # -----------------------------------------------------------
     def process_single_invoice(self, uploaded_file):
-        """
-        uploaded_file: Streamlit uploaded file object
-        """
-        # Save uploaded PDF to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(uploaded_file.read())
-            pdf_path = tmp.name
+    """
+    uploaded_file: Streamlit uploaded file object
+    """
+    # Rewind file pointer to start
+    uploaded_file.seek(0)
 
-        # --- Validate file is not empty ---
-        if os.path.getsize(pdf_path) == 0:
-            st.error("Uploaded PDF is empty.")
-            os.remove(pdf_path)
-            return pd.DataFrame()
+    # Save uploaded PDF to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(uploaded_file.read())
+        pdf_path = tmp.name
 
-        # Extract text and parse
-        text = self.extract_text_from_pdf(pdf_path)
-        rows = self.parse_invoice_text(text)
-        df = pd.DataFrame(rows)
+    print(f"[DEBUG] PDF saved at: {pdf_path}, size: {os.path.getsize(pdf_path)} bytes")
 
-        # Optional: delete temporary file
-        os.remove(pdf_path)
+    if os.path.getsize(pdf_path) == 0:
+        st.error("Uploaded PDF is empty.")
+        return pd.DataFrame()
 
-        # Warn if no table found
-        if df.empty:
-            st.warning("❌ No table data detected. Check the invoice format.")
+    # Extract text and parse
+    text = self.extract_text_from_pdf(pdf_path)
+    rows = self.parse_invoice_text(text)
+    df = pd.DataFrame(rows)
 
-        return df
+    # Optional: delete temporary file
+    os.remove(pdf_path)
+
+    if df.empty:
+        st.error("❌ No table data detected. Check the invoice format.")
+
+    return df
