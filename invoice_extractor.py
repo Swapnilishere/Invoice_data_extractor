@@ -1,21 +1,25 @@
 # ----------------------------------------------------------- 
 # invoice_extractor.py
-# Streamlit/Cloud-compatible backend with PDF validation
+# Streamlit/Cloud-compatible backend
+# Handles digital PDFs + scanned PDFs
 # -----------------------------------------------------------
 
-import pytesseract
 import re
 import pandas as pd
-from pdf2image import convert_from_path
-from pdf2image.exceptions import PDFPageCountError
 import tempfile
 import os
 import streamlit as st
 
+# PDF processing
+import pdfplumber
+import pytesseract
+from pdf2image import convert_from_path
+
 # -----------------------------------------------------------
-# Configure Tesseract path for Linux (Streamlit Cloud)
+# Configure Tesseract path for Streamlit Cloud (if OCR needed)
 # -----------------------------------------------------------
 pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+
 
 class ExtractInvoices:
     """
@@ -23,39 +27,37 @@ class ExtractInvoices:
     """
 
     def __init__(self):
-        # No folder path needed for cloud / single uploads
         pass
 
     # -----------------------------------------------------------
-    # STEP 1 → Convert PDF → Image → Extract Text using OCR
+    # STEP 1 → Extract text from PDF (digital or scanned)
     # -----------------------------------------------------------
     def extract_text_from_pdf(self, pdf_path):
         """
-        Converts PDF pages to images and extracts text using Tesseract OCR.
-        Added poppler_path for Streamlit Cloud compatibility.
+        First tries pdfplumber (works for digital PDFs).
+        If no text found, falls back to OCR using pdf2image + pytesseract.
         """
-
-        # Check if PDF is empty
-        if os.path.getsize(pdf_path) == 0:
-            st.error("❌ Uploaded PDF is empty.")
-            return ""
-
-        try:
-            pages = convert_from_path(pdf_path, dpi=300, poppler_path="/usr/bin")
-        except PDFPageCountError:
-            st.error("❌ Unable to read PDF. It may be corrupted or empty.")
-            return ""
-        except Exception as e:
-            st.error(f"❌ PDF conversion failed: {str(e)}")
-            return ""
-
         text = ""
-        for page in pages:
+
+        # --- Try pdfplumber first ---
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+        except Exception as e:
+            st.warning(f"pdfplumber failed: {e}")
+
+        # --- Fallback to OCR if no text found ---
+        if not text.strip():
             try:
-                text += pytesseract.image_to_string(page)
+                pages = convert_from_path(pdf_path, dpi=300, poppler_path="/usr/bin")
+                for page in pages:
+                    text += pytesseract.image_to_string(page) + "\n"
             except Exception as e:
-                st.error(f"❌ OCR failed on a page: {str(e)}")
-                continue
+                st.error(f"OCR failed: {e}")
+                return ""
 
         return text
 
@@ -70,20 +72,20 @@ class ExtractInvoices:
         2   Lunch Boxes (Set of 10)  15   800.0   12000.0
         """
         rows = []
-        if not text:
-            return rows
-
         lines = text.split("\n")
 
         for line in lines:
             clean = re.sub(r"\s{2,}", " ", line).strip()
 
             # Row format pattern
-            pattern = r"^(\d+)\s+(.*?)\s+(\d+)\s+([\d.]+)\s+([\d.]+)$"
+            pattern = r"^(\d+)\s+(.*?)\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)$"
             match = re.match(pattern, clean)
 
             if match:
                 sno, description, qty, price, total = match.groups()
+                # Remove commas from numbers if present
+                price = price.replace(",", "")
+                total = total.replace(",", "")
                 rows.append({
                     "S.No": int(sno),
                     "Item Description": description.strip(),
@@ -106,18 +108,22 @@ class ExtractInvoices:
             tmp.write(uploaded_file.read())
             pdf_path = tmp.name
 
-        # Extract text and parse
-        text = self.extract_text_from_pdf(pdf_path)
-        if not text:
-            # PDF invalid or OCR failed
+        # --- Validate file is not empty ---
+        if os.path.getsize(pdf_path) == 0:
+            st.error("Uploaded PDF is empty.")
             os.remove(pdf_path)
             return pd.DataFrame()
 
+        # Extract text and parse
+        text = self.extract_text_from_pdf(pdf_path)
         rows = self.parse_invoice_text(text)
         df = pd.DataFrame(rows)
 
         # Optional: delete temporary file
         os.remove(pdf_path)
 
-        return df
+        # Warn if no table found
+        if df.empty:
+            st.warning("❌ No table data detected. Check the invoice format.")
 
+        return df
