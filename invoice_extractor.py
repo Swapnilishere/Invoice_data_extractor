@@ -1,14 +1,15 @@
-# -----------------------------------------------------------
+# ----------------------------------------------------------- 
 # invoice_extractor.py
-# Streamlit/Cloud-compatible backend
+# Streamlit/Cloud-compatible backend with PDF validation
 # -----------------------------------------------------------
 
 import pytesseract
 import re
 import pandas as pd
-from pdf2image import convert_from_path
+from pdf2image import convert_from_path, PDFPageCountError
 import tempfile
 import os
+import streamlit as st
 
 # -----------------------------------------------------------
 # Configure Tesseract path for Linux (Streamlit Cloud)
@@ -32,10 +33,29 @@ class ExtractInvoices:
         Converts PDF pages to images and extracts text using Tesseract OCR.
         Added poppler_path for Streamlit Cloud compatibility.
         """
-        pages = convert_from_path(pdf_path, dpi=300, poppler_path="/usr/bin")
+
+        # Check if PDF is empty
+        if os.path.getsize(pdf_path) == 0:
+            st.error("❌ Uploaded PDF is empty.")
+            return ""
+
+        try:
+            pages = convert_from_path(pdf_path, dpi=300, poppler_path="/usr/bin")
+        except PDFPageCountError:
+            st.error("❌ Unable to read PDF. It may be corrupted or empty.")
+            return ""
+        except Exception as e:
+            st.error(f"❌ PDF conversion failed: {str(e)}")
+            return ""
+
         text = ""
         for page in pages:
-            text += pytesseract.image_to_string(page)
+            try:
+                text += pytesseract.image_to_string(page)
+            except Exception as e:
+                st.error(f"❌ OCR failed on a page: {str(e)}")
+                continue
+
         return text
 
     # -----------------------------------------------------------
@@ -49,6 +69,9 @@ class ExtractInvoices:
         2   Lunch Boxes (Set of 10)  15   800.0   12000.0
         """
         rows = []
+        if not text:
+            return rows
+
         lines = text.split("\n")
 
         for line in lines:
@@ -84,6 +107,11 @@ class ExtractInvoices:
 
         # Extract text and parse
         text = self.extract_text_from_pdf(pdf_path)
+        if not text:
+            # PDF invalid or OCR failed
+            os.remove(pdf_path)
+            return pd.DataFrame()
+
         rows = self.parse_invoice_text(text)
         df = pd.DataFrame(rows)
 
