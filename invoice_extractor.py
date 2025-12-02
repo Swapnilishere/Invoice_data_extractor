@@ -6,7 +6,8 @@
 import pytesseract
 import re
 import pandas as pd
-from pdf2image import convert_from_path, PDFPageCountError
+from pdf2image import convert_from_path
+from pdf2image.exceptions import PDFPageCountError
 import tempfile
 import os
 import streamlit as st
@@ -119,3 +120,4 @@ class ExtractInvoices:
         os.remove(pdf_path)
 
         return df
+
