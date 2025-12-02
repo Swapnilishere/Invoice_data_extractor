@@ -28,7 +28,11 @@ class ExtractInvoices:
     # STEP 1 → Convert PDF → Image → Extract Text using OCR
     # -----------------------------------------------------------
     def extract_text_from_pdf(self, pdf_path):
-        pages = convert_from_path(pdf_path, dpi=300)
+        """
+        Converts PDF pages to images and extracts text using Tesseract OCR.
+        Added poppler_path for Streamlit Cloud compatibility.
+        """
+        pages = convert_from_path(pdf_path, dpi=300, poppler_path="/usr/bin")
         text = ""
         for page in pages:
             text += pytesseract.image_to_string(page)
@@ -44,7 +48,6 @@ class ExtractInvoices:
         1   Ball Pens (Pack of 50)   20   150.0   3000.0
         2   Lunch Boxes (Set of 10)  15   800.0   12000.0
         """
-
         rows = []
         lines = text.split("\n")
 
